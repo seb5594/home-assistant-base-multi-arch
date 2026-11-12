@@ -85,6 +85,10 @@ RUN \
 # Copy with link, so installing deps can run in parallel while downloading sources
 COPY --link --from=python-source /usr/src/python /usr/src/python
 
+# Compiler optimizations (PGO and LTO). Builds that run under CPU emulation
+# can pass an empty value to stay within the CI time limit.
+ARG PYTHON_OPTIMIZATIONS="--enable-optimizations --with-lto"
+
 # Build and install patched Python
 RUN \
     --mount=type=bind,source=./patches,target=/usr/src/patches \
@@ -95,10 +99,9 @@ RUN \
     && ./configure \
         --build="$gnuArch" \
         --enable-loadable-sqlite-extensions \
-        --enable-optimizations \
+        ${PYTHON_OPTIMIZATIONS} \
         --enable-option-checking=fatal \
         --enable-shared \
-        --with-lto \
         --with-system-libmpdec \
         --with-system-expat \
         --without-ensurepip \
