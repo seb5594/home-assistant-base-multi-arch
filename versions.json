@@ -10,7 +10,7 @@
         "i386"
       ],
       "latest": false,
-      "edge": false
+      "dev": false
     },
     {
       "version": "3.23",
@@ -22,7 +22,7 @@
         "i386"
       ],
       "latest": false,
-      "edge": false
+      "dev": false
     },
     {
       "version": "3.24",
@@ -34,7 +34,7 @@
         "i386"
       ],
       "latest": true,
-      "edge": false
+      "dev": false
     },
     {
       "version": "edge",
@@ -46,7 +46,7 @@
         "i386"
       ],
       "latest": false,
-      "edge": true
+      "dev": true
     }
   ],
   "debian": [
@@ -59,7 +59,7 @@
         "i386"
       ],
       "latest": false,
-      "edge": false
+      "dev": false
     },
     {
       "version": "trixie",
@@ -71,7 +71,7 @@
         "i386"
       ],
       "latest": true,
-      "edge": false
+      "dev": false
     },
     {
       "version": "testing",
@@ -82,7 +82,7 @@
         "i386"
       ],
       "latest": false,
-      "edge": true
+      "dev": true
     }
   ],
   "ubuntu": [
@@ -94,7 +94,7 @@
         "armv7"
       ],
       "latest": false,
-      "edge": false
+      "dev": false
     },
     {
       "version": "24.04",
@@ -104,7 +104,7 @@
         "armv7"
       ],
       "latest": false,
-      "edge": false
+      "dev": false
     },
     {
       "version": "26.04",
@@ -114,7 +114,7 @@
         "armv7"
       ],
       "latest": true,
-      "edge": false
+      "dev": false
     },
     {
       "version": "rolling",
@@ -124,7 +124,7 @@
         "armv7"
       ],
       "latest": false,
-      "edge": true
+      "dev": true
     }
   ],
   "python": [

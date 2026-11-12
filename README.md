@@ -1,8 +1,8 @@
 # Home Assistant Base Images – all architectures
 
 A fork of [home-assistant/docker-base](https://github.com/home-assistant/docker-base) that keeps the
-architectures alive which Home Assistant has retired (`armv7`, `armhf` and `i386`) and adds rolling
-`edge` images. It is meant as one hybrid source for Alpine, Debian, Ubuntu and Python base images with
+architectures alive which Home Assistant has retired (`armv7`, `armhf` and `i386`) and adds a rolling
+`dev` channel. It is meant as one hybrid source for Alpine, Debian, Ubuntu and Python base images with
 S6-Overlay, Bashio and TempIO, ready to pull from GitHub Container Registry.
 
 The images contain the same components and keep the same default behavior as the originals. This is an
@@ -15,7 +15,7 @@ The images include [S6-Overlay](https://github.com/just-containers/s6-overlay),
 ## What this fork adds
 
 - **Legacy architectures** `armv7`, `armhf` and `i386` next to `amd64` and `aarch64`, wherever the distribution still provides them.
-- **Edge images** that follow Alpine `edge`, Debian `testing` and the newest Ubuntu (`devel` or `rolling`).
+- **Two channels**: the stable releases are the default, the experimental `dev` channel follows Alpine `edge`, Debian `testing` and the newest Ubuntu (`devel` or `rolling`).
 - **Automatic version pinning**: the newest supported Alpine, Debian and Ubuntu LTS releases and the newest three Python releases are detected and pinned in [`versions.json`](versions.json) every day.
 - **Upstream sync**: new Home Assistant component versions, patches and Python releases from the source repository are merged in every day.
 - **Prebuilt packages** on GHCR, rebuilt every week to include operating system security updates.
@@ -35,7 +35,7 @@ official Docker image, so a release that loses an architecture upstream loses it
 
 | Image | amd64 | aarch64 | armv7 | armhf | i386 |
 |-------|:-----:|:-------:|:-----:|:-----:|:----:|
-| Alpine (all releases and edge) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Alpine (all releases and `dev`) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Debian `trixie` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Debian `bookworm`, `testing` | ✅ | ✅ | ✅ | – | ✅ |
 | Ubuntu (all releases and rolling) | ✅ | ✅ | ✅ | – | – |
@@ -53,9 +53,9 @@ All images are published to `ghcr.io/seb5594/<image>` as multi-arch manifests, s
 
 | Image | OS | Tags | `latest` |
 |-------|----|------|----------|
-| `base` | Alpine | `3.22`, `3.23`, `3.24`, `edge` | `3.24` |
-| `base-debian` | Debian | `bookworm`, `trixie`, `testing` | `trixie` |
-| `base-ubuntu` | Ubuntu | `22.04`, `24.04`, `26.04`, `rolling` | `26.04` |
+| `base` | Alpine | `3.22`, `3.23`, `3.24`, `dev` | `3.24` |
+| `base-debian` | Debian | `bookworm`, `trixie`, `dev` | `trixie` |
+| `base-ubuntu` | Ubuntu | `22.04`, `24.04`, `26.04`, `dev` | `26.04` |
 | `base-python` | Alpine | `<python>-alpine<alpine>`, for example `3.14-alpine3.24` | `3.14-alpine3.24` |
 
 The table shows the state at the time of writing. [`versions.json`](versions.json) always has the releases that are currently pinned, including the architectures of each one.
@@ -67,17 +67,27 @@ Every release is published with these tags:
 | `3.24` | Newest build of this release |
 | `3.24-2026.11.12.57` | A specific build (date and run number, or the release tag for tagged releases) |
 | `latest` | The newest stable release |
-| `edge` | The rolling release of the Debian and Ubuntu images. Alpine already uses `edge` as its tag |
+| `dev` | The experimental channel, see below. Its builds are tagged `dev-<build>` |
 
-Python images exist for the newest three Python releases, on every Alpine release including edge (for example `3.15-alpineedge`).
+Python images exist for the newest three Python releases, on every stable Alpine release (for example `3.15-alpine3.24`) and on the `dev` channel (`3.15-dev`).
 `latest` points to the newest Python release that is at least 90 days old, so a fresh release does not become the default right away.
 
 The per-architecture images (`amd64-base`, `armv7-base-python`, …) are building blocks for the manifests. Use the plain names.
 
-### Edge images
+### Channels
 
-Edge images follow the development branch of the distribution (Alpine `edge`, Debian `testing`, Ubuntu `devel`, or `rolling` while no development release is open).
-They are rebuilt every week and can break when the distribution changes under them. A failing edge build does not affect the stable images.
+The stable releases are the default. Use the numbered or named tags (`3.24`, `trixie`, `24.04`, `3.14-alpine3.24`) for anything that should keep working.
+
+The `dev` channel is experimental. It is built from the development branch of each distribution:
+
+| Image | `dev` is built from |
+|-------|---------------------|
+| `base` | Alpine `edge` |
+| `base-debian` | Debian `testing` |
+| `base-ubuntu` | Ubuntu `devel`, or `rolling` while no development release is open |
+| `base-python` | the newest three Python releases on Alpine `edge` |
+
+The `dev` images are rebuilt every week and can break when the distribution changes under them. A failing `dev` build does not affect the stable images.
 
 ### jemalloc
 
@@ -95,7 +105,7 @@ Details:
 
 - **Pinning.** Alpine, Debian and Ubuntu releases come from [endoflife.date](https://endoflife.date), the architectures from the Docker official images, Python releases from python.org. Only releases that are in support and already published as Docker images are pinned. Debian and Ubuntu follow the same policy as the original: stable and LTS releases that are still in regular or LTS support, without ELTS and ESM.
 - **New Python releases.** When a new Python release appears before the source repository has a Dockerfile for it, one is generated from the newest existing one and marked with `python/<version>/.auto-generated`. It is removed automatically as soon as the source repository ships its own.
-- **Pull requests and pushes** only build the stable releases on `amd64`, `aarch64` and `i386`, to give quick feedback. The slow emulated builds and the edge images run on schedule, on release and when started manually.
+- **Pull requests and pushes** only build the stable releases on `amd64`, `aarch64` and `i386`, to give quick feedback. The slow emulated builds and the `dev` images run on schedule, on release and when started manually.
 - **Publishing.** Scheduled builds are tagged `YYYY.MM.DD.<run number>`, releases use their release tag. Images are signed with Cosign, and the Python images verify the signature of their base image before building.
 - **Failures.** The ARM variants are best effort: if one of them fails, the remaining architectures are still published and the failed job is visible in the run.
 
@@ -180,7 +190,7 @@ Dieses Repository ist ein Fork von [home-assistant/docker-base](https://github.c
 Was dieser Fork ergänzt:
 
 - **Legacy-Architekturen**, überall dort, wo die Distribution sie noch liefert. Ubuntu bietet nur `armv7`, Debian `bookworm` und `testing` haben kein `armhf`.
-- **Edge-Images** für Alpine `edge`, Debian `testing` und das neueste Ubuntu. Sie werden jede Woche neu gebaut und können brechen, wenn sich die Distribution ändert.
+- **Zwei Kanäle**: Standard sind die stabilen Releases. Der experimentelle Kanal `dev` basiert auf Alpine `edge`, Debian `testing` und dem neuesten Ubuntu. Er wird jede Woche neu gebaut und kann brechen, wenn sich die Distribution ändert. Python gibt es dort als `3.15-dev`.
 - **Automatisches Pinning** der neuesten unterstützten Alpine-, Debian- und Ubuntu-LTS-Releases sowie der drei neuesten Python-Versionen in [`versions.json`](versions.json), täglich geprüft.
 - **Abgleich mit dem Quell-Repository**: Neue Komponentenversionen, Patches und Python-Versionen aus `home-assistant/docker-base` werden täglich eingespielt. Eigene Änderungen an den übernommenen Dateien sind bewusst minimal gehalten. Bei einem Konflikt wird nichts gepusht, stattdessen wird ein Issue angelegt.
 - **Wöchentlich neu gebaute Images**, damit Sicherheitsupdates des Betriebssystems enthalten sind.

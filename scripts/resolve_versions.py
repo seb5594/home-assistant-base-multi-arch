@@ -175,12 +175,12 @@ def is_supported(cycle: dict, today: dt.date) -> bool:
     return dt.date.fromisoformat(eol) > today
 
 
-def release_line(version: str, architectures: list[str], latest: bool, edge: bool) -> dict:
+def release_line(version: str, architectures: list[str], latest: bool, dev: bool) -> dict:
     return {
         "version": version,
         "architectures": architectures,
         "latest": latest,
-        "edge": edge,
+        "dev": dev,
     }
 
 
@@ -188,7 +188,7 @@ def build_lines(
     distro: str,
     stable: list[tuple[str, str]],
     library: list[LibraryEntry],
-    edge: tuple[str, str] | None,
+    dev_release: tuple[str, str] | None,
 ) -> list[dict]:
     """Turn (version, library tag) pairs into release lines.
 
@@ -208,8 +208,8 @@ def build_lines(
         raise ResolveError(f"no supported {distro} release found")
     lines.reverse()  # oldest first, like the original build matrices
 
-    if edge is not None:
-        version, tag = edge
+    if dev_release is not None:
+        version, tag = dev_release
         entry = find_entry(library, tag)
         if entry is not None:
             lines.append(release_line(version, map_architectures(distro, entry.architectures), False, True))
@@ -228,7 +228,7 @@ def resolve_alpine(cycles: list[dict], library: list[LibraryEntry], today: dt.da
         reverse=True,
     )
     stable = [(cycle["cycle"], cycle["cycle"]) for cycle in supported]
-    return build_lines("alpine", stable, library, edge=("edge", "edge"))
+    return build_lines("alpine", stable, library, dev_release=("edge", "edge"))
 
 
 def resolve_debian(cycles: list[dict], library: list[LibraryEntry], today: dt.date) -> list[dict]:
@@ -241,7 +241,7 @@ def resolve_debian(cycles: list[dict], library: list[LibraryEntry], today: dt.da
     stable = [
         (cycle["codename"].lower(), f"{cycle['codename'].lower()}-slim") for cycle in supported
     ]
-    return build_lines("debian", stable, library, edge=("testing", "testing-slim"))
+    return build_lines("debian", stable, library, dev_release=("testing", "testing-slim"))
 
 
 def resolve_ubuntu(cycles: list[dict], library: list[LibraryEntry], today: dt.date) -> list[dict]:
@@ -253,8 +253,8 @@ def resolve_ubuntu(cycles: list[dict], library: list[LibraryEntry], today: dt.da
     )
     stable = [(cycle["cycle"], cycle["cycle"]) for cycle in supported]
     # "devel" only exists while a development cycle is open, "rolling" is the newest release.
-    edge_tag = "devel" if find_entry(library, "devel") else "rolling"
-    return build_lines("ubuntu", stable, library, edge=(edge_tag, edge_tag))
+    dev_tag = "devel" if find_entry(library, "devel") else "rolling"
+    return build_lines("ubuntu", stable, library, dev_release=(dev_tag, dev_tag))
 
 
 # --------------------------------------------------------------------------- #

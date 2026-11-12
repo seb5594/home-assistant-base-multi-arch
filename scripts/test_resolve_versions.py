@@ -96,7 +96,7 @@ class DistributionTest(unittest.TestCase):
         lines = rv.resolve_alpine(ALPINE_CYCLES, rv.parse_library(ALPINE_LIBRARY), TODAY)
         self.assertEqual([line["version"] for line in lines], ["3.23", "3.24", "edge"])
         self.assertEqual([line["latest"] for line in lines], [False, True, False])
-        self.assertEqual([line["edge"] for line in lines], [False, False, True])
+        self.assertEqual([line["dev"] for line in lines], [False, False, True])
         self.assertEqual(lines[1]["architectures"], ["amd64", "aarch64", "armv7", "armhf", "i386"])
 
     def test_debian_uses_codename_and_slim_tags(self):
@@ -110,7 +110,7 @@ class DistributionTest(unittest.TestCase):
         self.assertNotIn("armhf", lines[0]["architectures"])
         self.assertIn("armhf", lines[1]["architectures"])
 
-    def test_ubuntu_only_lts_and_rolling_edge(self):
+    def test_ubuntu_only_lts_and_rolling_dev(self):
         cycles = [
             {"cycle": "26.10", "releaseDate": "2026-10-15", "eol": "2027-07-01", "lts": False},
             {"cycle": "26.04", "releaseDate": "2026-04-23", "eol": "2031-05-29", "lts": True},
