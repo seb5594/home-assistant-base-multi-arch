@@ -1,0 +1,144 @@
+{
+  "alpine": [
+    {
+      "version": "3.22",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7",
+        "armhf",
+        "i386"
+      ],
+      "latest": false,
+      "edge": false
+    },
+    {
+      "version": "3.23",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7",
+        "armhf",
+        "i386"
+      ],
+      "latest": false,
+      "edge": false
+    },
+    {
+      "version": "3.24",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7",
+        "armhf",
+        "i386"
+      ],
+      "latest": true,
+      "edge": false
+    },
+    {
+      "version": "edge",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7",
+        "armhf",
+        "i386"
+      ],
+      "latest": false,
+      "edge": true
+    }
+  ],
+  "debian": [
+    {
+      "version": "bookworm",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7",
+        "i386"
+      ],
+      "latest": false,
+      "edge": false
+    },
+    {
+      "version": "trixie",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7",
+        "armhf",
+        "i386"
+      ],
+      "latest": true,
+      "edge": false
+    },
+    {
+      "version": "testing",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7",
+        "i386"
+      ],
+      "latest": false,
+      "edge": true
+    }
+  ],
+  "ubuntu": [
+    {
+      "version": "22.04",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7"
+      ],
+      "latest": false,
+      "edge": false
+    },
+    {
+      "version": "24.04",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7"
+      ],
+      "latest": false,
+      "edge": false
+    },
+    {
+      "version": "26.04",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7"
+      ],
+      "latest": true,
+      "edge": false
+    },
+    {
+      "version": "rolling",
+      "architectures": [
+        "amd64",
+        "aarch64",
+        "armv7"
+      ],
+      "latest": false,
+      "edge": true
+    }
+  ],
+  "python": [
+    {
+      "version": "3.13",
+      "latest": false
+    },
+    {
+      "version": "3.14",
+      "latest": true
+    },
+    {
+      "version": "3.15",
+      "latest": false
+    }
+  ]
+}
