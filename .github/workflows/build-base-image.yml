@@ -81,11 +81,16 @@ on:
         required: true
         type: string
       image-tags:
-        description: Image tags, one per line
+        description: Image tags, one per line, with the build-specific tag first for manifest assembly
         required: true
         type: string
       labels:
         description: Additional OCI labels (key=value format, one per line)
+        required: false
+        default: ""
+        type: string
+      local-alpine-version:
+        description: Build Python using the Alpine Dockerfile from this checkout for CI runs without publishing
         required: false
         default: ""
         type: string
@@ -176,7 +181,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Build Python from the checked-out Alpine base
+        if: inputs.local-alpine-version != ''
+        uses: ./.github/actions/build-python-local
+        with:
+          alpine-version: ${{ inputs.local-alpine-version }}
+          context: ${{ inputs.context }}
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.arch == 'aarch64' && 'linux/arm64' || 'linux/amd64' }}
+          version: ${{ inputs.version }}
+          cache-scope: ${{ inputs.cache-gha && format('{0}-ci-{1}', matrix.arch, inputs.cache-gha-scope) || '' }}
+
       - name: Build image
+        if: inputs.local-alpine-version == ''
         id: build
         uses: home-assistant/builder/actions/build-image@7412f0023ea9b6e58e8bb5059f1660f51376f49a # 2026.09.0
         with:
@@ -227,10 +244,24 @@ jobs:
         if: matrix.emulated
         uses: docker/setup-qemu-action@v4 # Renovate pins the digest
 
+      - name: Build Python from the checked-out Alpine base
+        if: inputs.local-alpine-version != ''
+        uses: ./.github/actions/build-python-local
+        with:
+          alpine-version: ${{ inputs.local-alpine-version }}
+          context: ${{ inputs.context }}
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          version: ${{ inputs.version }}
+          cache-scope: ${{ inputs.cache-gha && format('{0}-ci-{1}', matrix.arch, inputs.cache-gha-scope) || '' }}
+          emulated: ${{ matrix.emulated }}
+
       - name: Set up Docker Buildx
+        if: inputs.local-alpine-version == ''
         uses: docker/setup-buildx-action@v3 # Renovate pins the digest
 
       - name: Log in to GitHub Container Registry
+        if: inputs.local-alpine-version == ''
         uses: docker/login-action@v4 # Renovate pins the digest
         with:
           registry: ghcr.io
@@ -238,11 +269,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
-        if: inputs.cosign || inputs.cosign-base-verify != ''
+        if: inputs.local-alpine-version == '' && (inputs.cosign || inputs.cosign-base-verify != '')
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
       - name: Verify base image signature
-        if: inputs.cosign-base-verify != ''
+        if: inputs.local-alpine-version == '' && inputs.cosign-base-verify != ''
         shell: bash
         env:
           BASE_IMAGE: ${{ inputs.cosign-base-verify }}
@@ -255,6 +286,7 @@ jobs:
             "${BASE_IMAGE}" > /dev/null
 
       - name: Compute image tags
+        if: inputs.local-alpine-version == ''
         id: options
         shell: bash
         env:
@@ -273,6 +305,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build image
+        if: inputs.local-alpine-version == ''
         id: build
         uses: docker/build-push-action@v6 # Renovate pins the digest
         with:
@@ -304,7 +337,7 @@ jobs:
             ${{ inputs.labels }}
 
       - name: Sign image
-        if: inputs.push && inputs.cosign
+        if: inputs.local-alpine-version == '' && inputs.push && inputs.cosign
         shell: bash
         env:
           REFERENCE: ${{ matrix.image }}@${{ steps.build.outputs.digest }}
@@ -355,6 +388,10 @@ jobs:
               echo "::warning::No ${arch} image for ${IMAGE_NAME}:${first_tag}, it is left out of the manifest"
             fi
           done
+          if (( ${#available[@]} == 0 )); then
+            echo "::error::No images from this build are available for ${IMAGE_NAME}:${first_tag}"
+            exit 1
+          fi
           echo "architectures=$(jq -cn '$ARGS.positional' --args "${available[@]}")" >> "${GITHUB_OUTPUT}"
 
       - name: Publish multi-arch manifest
