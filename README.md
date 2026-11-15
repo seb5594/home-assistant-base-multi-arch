@@ -106,12 +106,13 @@ Details:
 - **Pinning.** Alpine, Debian and Ubuntu releases come from [endoflife.date](https://endoflife.date), the architectures from the Docker official images, Python releases from python.org. Only releases that are in support and already published as Docker images are pinned. Debian and Ubuntu follow the same policy as the original: stable and LTS releases that are still in regular or LTS support, without ELTS and ESM.
 - **New Python releases.** When a new Python release appears before the source repository has a Dockerfile for it, one is generated from the newest existing one and marked with `python/<version>/.auto-generated`. It is removed automatically as soon as the source repository ships its own.
 - **Pull requests and pushes** only build the stable releases on `amd64`, `aarch64` and `i386`, to give quick feedback. The slow emulated builds and the `dev` images run on schedule, on release and when started manually.
-- **Publishing.** Scheduled builds are tagged `YYYY.MM.DD.<run number>`, releases use their release tag. Images are signed with Cosign, and the Python images verify the signature of their base image before building.
+- **Python builds.** Runs with publishing disabled build Python on the Alpine Dockerfile from the same checkout. Publishing runs build Python on the signed Alpine image tagged for that run, including `dev` for Alpine edge.
+- **Publishing.** Scheduled builds are tagged `YYYY.MM.DD.<run number>`, releases use their release tag. Images are signed with Cosign.
 - **Failures.** The ARM variants are best effort: if one of them fails, the remaining architectures are still published and the failed job is visible in the run.
 
 ### Setup for your own fork
 
-1. Enable GitHub Actions and run `Build base images` once manually with `publish` enabled. The Python images are built on top of the published base images.
+1. Enable GitHub Actions and run `Build base images` with `publish` enabled to publish the first set of images.
 2. Add a repository secret `SYNC_TOKEN` with a personal access token that has the `repo` and `workflow` scopes. The default token cannot push changes to `.github/workflows`, which merging the source repository can involve.
 3. In the package settings of the images, link them to the repository and set the visibility you want.
 

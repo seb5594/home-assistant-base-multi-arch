@@ -109,6 +109,7 @@ jobs:
                   | {
                       python_version: $python.version,
                       alpine_version: .version,
+                      alpine_tag: .tag,
                       dev: .dev,
                       tag: (
                         if .dev
@@ -147,8 +148,8 @@ jobs:
       context: alpine
       image-name: base
       image-tags: |
-        ${{ matrix.tag }}
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
         io.hass.base.image=alpine:${{ matrix.version }}
@@ -175,8 +176,8 @@ jobs:
       context: debian
       image-name: base-debian
       image-tags: |
-        ${{ matrix.tag }}
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
         io.hass.base.image=debian:${{ matrix.version }}-slim
@@ -203,8 +204,8 @@ jobs:
       context: ubuntu
       image-name: base-ubuntu
       image-tags: |
-        ${{ matrix.tag }}
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
         io.hass.base.image=ubuntu:${{ matrix.version }}
@@ -228,21 +229,22 @@ jobs:
       architectures: ${{ matrix.architectures }}
       build-args: |
         BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/base
-        BASE_VERSION=${{ matrix.alpine_version }}
+        BASE_VERSION=${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
       cache-gha-scope: python-${{ matrix.python_version }}-alpine${{ matrix.alpine_version }}
       cache-image-tag: ${{ matrix.tag }}
       context: python/${{ matrix.python_version }}
       cosign-base-identity: "https://github.com/${{ github.repository }}/.*"
-      cosign-base-verify: ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_version }}
+      cosign-base-verify: ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
       # Profile-guided and link-time optimization take hours under CPU emulation
       emulated-build-args: |
         PYTHON_OPTIMIZATIONS=
       image-name: base-python
       image-tags: |
-        ${{ matrix.tag }}
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
-        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_version }}
+        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
+      local-alpine-version: ${{ needs.init.outputs.push != 'true' && matrix.alpine_version || '' }}
       push: ${{ needs.init.outputs.push == 'true' }}
       version: ${{ needs.init.outputs.version }}
