@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import prune_ghcr_tags as cleanup
 
@@ -23,7 +23,18 @@ class PruneTagsTest(unittest.TestCase):
         ):
             cleanup.prune("owner", "base", "3.15", "2026.11")
         endpoint = "https://api.example.test/users/owner/packages/container/base/versions/3"
-        self.assertEqual(request.call_args_list, [unittest.mock.call(endpoint), unittest.mock.call(endpoint, "DELETE")])
+        self.assertEqual(request.call_args_list, [call(endpoint), call(endpoint, "DELETE")])
+
+    def test_uses_monthly_tags_from_the_renamed_package_for_cleanup(self):
+        old = package_version(3, "3.23-2026.11.15.7")
+        with (
+            patch.dict(cleanup.os.environ, {"GITHUB_API_URL": "https://api.example.test"}),
+            patch.object(cleanup, "list_versions", return_value=[old]),
+            patch.object(cleanup, "request", side_effect=[old, None]) as request,
+        ):
+            cleanup.prune("owner", "base", "3.15", "2026.11", {"3.23-2026.11"})
+        endpoint = "https://api.example.test/users/owner/packages/container/base/versions/3"
+        self.assertEqual(request.call_args_list, [call(endpoint), call(endpoint, "DELETE")])
 
     def test_retires_older_python_dev_after_the_replacement_exists(self):
         for tag in ("3.9-dev", "3.9-dev-2026.11.16.8", "3.9-dev-2026.11"):

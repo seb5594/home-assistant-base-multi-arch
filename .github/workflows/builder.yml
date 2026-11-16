@@ -146,7 +146,7 @@ jobs:
         ALPINE_VERSION=${{ matrix.version }}
       cache-gha-scope: alpine-${{ matrix.version }}
       context: alpine
-      image-name: base
+      image-name: home-assistant-base
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
@@ -174,7 +174,7 @@ jobs:
         DEBIAN_VERSION=${{ matrix.version }}
       cache-gha-scope: debian-${{ matrix.version }}
       context: debian
-      image-name: base-debian
+      image-name: home-assistant-base-debian
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
@@ -202,7 +202,7 @@ jobs:
         UBUNTU_VERSION=${{ matrix.version }}
       cache-gha-scope: ubuntu-${{ matrix.version }}
       context: ubuntu
-      image-name: base-ubuntu
+      image-name: home-assistant-base-ubuntu
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
@@ -230,17 +230,17 @@ jobs:
       architectures: ${{ matrix.architectures }}
       cache-gha-scope: python-${{ matrix.python_version }}-alpine${{ matrix.alpine_version }}
       context: python/${{ matrix.python_version }}
-      published-base: ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
+      published-base: ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
       # Profile-guided and link-time optimization take hours under CPU emulation
       emulated-build-args: |
         PYTHON_OPTIMIZATIONS=
-      image-name: base-python
+      image-name: home-assistant-base-python
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
-        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
+        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
       local-alpine-version: ${{ needs.init.outputs.push != 'true' && matrix.alpine_version || '' }}
       push: ${{ needs.init.outputs.push == 'true' }}
       version: ${{ needs.init.outputs.version }}

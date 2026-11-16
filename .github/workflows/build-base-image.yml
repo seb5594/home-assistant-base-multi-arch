@@ -39,7 +39,7 @@ on:
         default: ""
         type: string
       image-name:
-        description: Image name without a tag (e.g., "base-python")
+        description: Image name without a tag (e.g., "home-assistant-base-python")
         required: true
         type: string
       image-tags:

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -15,7 +16,7 @@ COSIGN_TAG = re.compile(r"sha256-([a-f0-9]{64})(?:\.(sig|att))?")
 SIGSTORE_BUNDLE = "application/vnd.dev.sigstore.bundle.v0.3+json"
 
 
-def package_names(versions):
+def package_names(versions, prefix="home-assistant-"):
     """Use the same package names as the image workflow."""
     families = {
         "base": versions["alpine"],
@@ -24,6 +25,7 @@ def package_names(versions):
         "base-python": versions["alpine"],
     }
     for name, releases in families.items():
+        name = prefix + name
         yield name
         arches = {arch for release in releases for arch in release["architectures"]}
         yield from (f"{arch}-{name}" for arch in sorted(arches))
@@ -87,8 +89,29 @@ def request(url, method="GET"):
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    with urlopen(Request(url, method=method, headers=headers), timeout=30) as response:
-        return json.load(response) if method == "GET" else None
+    for attempt in range(8):
+        try:
+            with urlopen(Request(url, method=method, headers=headers), timeout=30) as response:
+                if method == "GET":
+                    return json.load(response)
+            # Space out registry mutations during the initial migration.
+            time.sleep(1)
+            return None
+        except HTTPError as error:
+            retry_after = error.headers.get("Retry-After")
+            exhausted = error.headers.get("X-RateLimit-Remaining") == "0"
+            limited = error.code == 429 or (
+                error.code == 403 and (retry_after or exhausted or b"rate limit" in error.read().lower())
+            )
+            if not limited or attempt == 7:
+                raise
+            delay = 60 * 2**attempt
+            if retry_after:
+                delay = max(delay, int(retry_after))
+            elif exhausted:
+                delay = max(delay, int(error.headers["X-RateLimit-Reset"]) - int(time.time()) + 1)
+            print(f"GitHub Packages rate limit, retrying in {delay}s", flush=True)
+            time.sleep(delay)
 
 
 def list_versions(endpoint):
@@ -107,10 +130,10 @@ def list_versions(endpoint):
         page += 1
 
 
-def prune(owner, name, newest_python, month):
-    endpoint = f"{os.environ['GITHUB_API_URL']}/users/{owner}/packages/container/{name}/versions"
+def prune(owner, name, newest_python, month, replacement_tags=None):
+    endpoint = versions_endpoint(owner, name)
     versions = list_versions(endpoint)
-    existing_tags = {tag for version in versions for tag in tags(version)}
+    existing_tags = collect_tags(versions) if replacement_tags is None else replacement_tags
     if not any(tag.endswith(f"-{month}") for tag in existing_tags):
         print(f"{name}: waiting for a monthly image", flush=True)
         return
@@ -144,6 +167,14 @@ def prune(owner, name, newest_python, month):
         request(url, "DELETE")
 
 
+def versions_endpoint(owner, name):
+    return f"{os.environ['GITHUB_API_URL']}/users/{owner}/packages/container/{name}/versions"
+
+
+def collect_tags(versions):
+    return {tag for version in versions for tag in tags(version)}
+
+
 def tags(version):
     return version["metadata"]["container"]["tags"]
 
@@ -153,8 +184,10 @@ def main():
     month = os.environ["CURRENT_MONTH"]
     versions = json.loads(Path("versions.json").read_text(encoding="utf-8"))
     newest_python = max((release["version"] for release in versions["python"]), key=version_key)
-    for name in package_names(versions):
-        prune(owner, name, newest_python, month)
+    for old_name, new_name in zip(package_names(versions, prefix=""), package_names(versions)):
+        replacements = collect_tags(list_versions(versions_endpoint(owner, new_name)))
+        prune(owner, old_name, newest_python, month, replacement_tags=replacements)
+        prune(owner, new_name, newest_python, month, replacement_tags=replacements)
 
 
 if __name__ == "__main__":

@@ -51,12 +51,16 @@ Notes on the 32-bit variants:
 
 All images are published to `ghcr.io/seb5594/<image>` as multi-arch manifests, so `docker pull` picks the right architecture automatically.
 
+```bash
+docker pull ghcr.io/seb5594/home-assistant-base:3.23
+```
+
 | Image | OS | Tags | `latest` |
 |-------|----|------|----------|
-| `base` | Alpine | `3.22`, `3.23`, `3.24`, `dev` | `3.24` |
-| `base-debian` | Debian | `bookworm`, `trixie`, `dev` | `trixie` |
-| `base-ubuntu` | Ubuntu | `22.04`, `24.04`, `26.04`, `dev` | `26.04` |
-| `base-python` | Alpine | `<python>-alpine<alpine>`, for example `3.14-alpine3.24` | `3.14-alpine3.24` |
+| `home-assistant-base` | Alpine | `3.22`, `3.23`, `3.24`, `dev` | `3.24` |
+| `home-assistant-base-debian` | Debian | `bookworm`, `trixie`, `dev` | `trixie` |
+| `home-assistant-base-ubuntu` | Ubuntu | `22.04`, `24.04`, `26.04`, `dev` | `26.04` |
+| `home-assistant-base-python` | Alpine | `<python>-alpine<alpine>`, for example `3.14-alpine3.24` | `3.14-alpine3.24` |
 
 The table shows the state at the time of writing. [`versions.json`](versions.json) always has the releases that are currently pinned, including the architectures of each one.
 
@@ -72,7 +76,7 @@ Every release is published with these tags:
 Python images exist for the newest three Python releases on every stable Alpine release (for example `3.15-alpine3.24`). The `dev` channel combines only the newest Python release with Alpine edge (for example `3.15-dev`).
 `latest` points to the newest Python release that is at least 90 days old, so a fresh release does not become the default right away.
 
-The per-architecture images (`amd64-base`, `armv7-base-python`, …) are building blocks for the manifests. Use the plain names.
+The per-architecture images (`amd64-home-assistant-base`, `armv7-home-assistant-base-python`, …) are building blocks for the manifests. Use the plain names.
 
 ### Channels
 
@@ -82,10 +86,10 @@ The `dev` channel is experimental. It is built from the development branch of ea
 
 | Image | `dev` is built from |
 |-------|---------------------|
-| `base` | Alpine `edge` |
-| `base-debian` | Debian `testing` |
-| `base-ubuntu` | Ubuntu `devel`, or `rolling` while no development release is open |
-| `base-python` | the newest Python release on Alpine `edge` |
+| `home-assistant-base` | Alpine `edge` |
+| `home-assistant-base-debian` | Debian `testing` |
+| `home-assistant-base-ubuntu` | Ubuntu `devel`, or `rolling` while no development release is open |
+| `home-assistant-base-python` | the newest Python release on Alpine `edge` |
 
 The `dev` images are rebuilt every week and can break when the distribution changes under them. A failing `dev` build does not affect the stable images.
 
@@ -107,8 +111,8 @@ Details:
 - **New Python releases.** When a new Python release appears before the source repository has a Dockerfile for it, one is generated from the newest existing one and marked with `python/<version>/.auto-generated`. It is removed automatically as soon as the source repository ships its own.
 - **Pull requests and pushes** only build the stable releases on `amd64`, `aarch64` and `i386`, to give quick feedback. The slow emulated builds and the `dev` images run on schedule, on release and when started manually.
 - **Python builds.** Runs with publishing disabled build Python on the Alpine Dockerfile from the same checkout. Publishing runs verify the provenance of the Alpine manifest created by that run and build Python against its digest.
-- **Publishing.** Each publish updates the release aliases and the current UTC month's `<release>-YYYY.MM` tag. Signed provenance for the multi-architecture manifests is stored in GitHub Actions. For example, verify an image with `gh attestation verify oci://ghcr.io/seb5594/base:3.24 --repo seb5594/home-assistant-base_all-archs`.
-- **Registry cleanup.** After publishing, the workflow removes superseded daily versions, retired Python dev versions and old Cosign sidecars from the base image packages. Daily versions are removed only when their monthly replacement exists and the version has no retained aliases.
+- **Publishing.** Each publish updates the release aliases and the current UTC month's `<release>-YYYY.MM` tag. Signed provenance for the multi-architecture manifests is stored in GitHub Actions. For example, verify an image with `gh attestation verify oci://ghcr.io/seb5594/home-assistant-base:3.24 --repo seb5594/home-assistant-base_all-archs`.
+- **Registry cleanup.** After publishing, the workflow removes superseded daily versions, retired Python dev versions and old Cosign sidecars. Daily versions are removed only when their monthly replacement exists and the version has no retained aliases. Stable tags in the legacy `base*` packages remain available for existing pulls.
 - **Failures.** The ARM variants are best effort: if one of them fails, the remaining architectures are still published and the failed job is visible in the run.
 
 ### Setup for your own fork
@@ -164,7 +168,7 @@ Python 3.14 image, using the Alpine 3.24 base image from GHCR:
 
 ```bash
 docker buildx build \
-  --build-arg BASE_IMAGE=ghcr.io/seb5594/base \
+  --build-arg BASE_IMAGE=ghcr.io/seb5594/home-assistant-base \
   --build-arg BASE_VERSION=3.24 \
   -t base-python:3.14-alpine3.24 \
   python/3.14/
@@ -176,7 +180,7 @@ For another architecture, set the platform. Building for a platform other than t
 # 32-bit ARM (armv7), optimizations disabled to keep the build time reasonable under emulation
 docker buildx build \
   --platform linux/arm/v7 \
-  --build-arg BASE_IMAGE=ghcr.io/seb5594/base \
+  --build-arg BASE_IMAGE=ghcr.io/seb5594/home-assistant-base \
   --build-arg BASE_VERSION=3.24 \
   --build-arg PYTHON_OPTIMIZATIONS= \
   -t base-python:3.14-alpine3.24-armv7 \
