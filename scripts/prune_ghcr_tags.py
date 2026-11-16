@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
@@ -14,10 +15,16 @@ DAILY_TAG = re.compile(r"(.+-\d{4}\.\d{2})\.\d{2}\.\d+")
 PYTHON_DEV_TAG = re.compile(r"(\d+\.\d+)-dev(?:-\d{4}\.\d{2}(?:\.\d{2}\.\d+)?)?")
 COSIGN_TAG = re.compile(r"sha256-([a-f0-9]{64})(?:\.(sig|att))?")
 SIGSTORE_BUNDLE = "application/vnd.dev.sigstore.bundle.v0.3+json"
+PLATFORMS = {
+    "amd64": ("amd64", ""),
+    "aarch64": ("arm64", ""),
+    "armv7": ("arm", "v7"),
+    "armhf": ("arm", "v6"),
+    "i386": ("386", ""),
+}
 
 
-def package_names(versions, prefix="home-assistant-"):
-    """Use the same package names as the image workflow."""
+def package_architectures(versions):
     families = {
         "base": versions["alpine"],
         "base-debian": versions["debian"],
@@ -25,10 +32,8 @@ def package_names(versions, prefix="home-assistant-"):
         "base-python": versions["alpine"],
     }
     for name, releases in families.items():
-        name = prefix + name
-        yield name
         arches = {arch for release in releases for arch in release["architectures"]}
-        yield from (f"{arch}-{name}" for arch in sorted(arches))
+        yield name, sorted(arches)
 
 
 def version_key(version):
@@ -130,15 +135,39 @@ def list_versions(endpoint):
         page += 1
 
 
-def prune(owner, name, newest_python, month, replacement_tags=None):
+def prune(owner, name, newest_python, month, replacement_tags=None, retire_package=False):
     endpoint = versions_endpoint(owner, name)
     versions = list_versions(endpoint)
+    if not versions:
+        return True
     existing_tags = collect_tags(versions) if replacement_tags is None else replacement_tags
     if not any(tag.endswith(f"-{month}") for tag in existing_tags):
         print(f"{name}: waiting for a monthly image", flush=True)
-        return
+        return False
     repository = f"ghcr.io/{owner.lower()}/{name}"
     is_python = name.endswith("base-python")
+    if retire_package:
+        legacy_tags = collect_tags(versions)
+        sidecar_tags = {tag for tag in legacy_tags if COSIGN_TAG.fullmatch(tag)}
+        covered = all(
+            tag in existing_tags or obsolete_tag(tag, existing_tags, is_python, newest_python, month)
+            for tag in legacy_tags - sidecar_tags
+        )
+        if (
+            legacy_tags
+            and covered
+            and all(cosign_sidecar(repository, tag) is not None for tag in sorted(sidecar_tags))
+            and legacy_tags == collect_tags(list_versions(endpoint))
+        ):
+            print(f"{name}: removing the legacy package after verifying its replacements", flush=True)
+            try:
+                request(endpoint.removesuffix("/versions"), "DELETE")
+            except HTTPError as error:
+                if error.code not in (400, 422):
+                    raise
+                print(f"{name}: GitHub refused package deletion, pruning obsolete versions individually", flush=True)
+            else:
+                return True
     candidates = []
     bundle_digests = set()
     for version in versions:
@@ -165,6 +194,7 @@ def prune(owner, name, newest_python, month, replacement_tags=None):
             continue
         print(f"{name}: removing {', '.join(tags(version)) or version['name']}", flush=True)
         request(url, "DELETE")
+    return False
 
 
 def versions_endpoint(owner, name):
@@ -179,15 +209,57 @@ def tags(version):
     return version["metadata"]["container"]["tags"]
 
 
+def public_tags(owner, name):
+    repository = f"{owner.lower()}/{name}"
+    query = urlencode({"service": "ghcr.io", "scope": f"repository:{repository}:pull"})
+    try:
+        with urlopen(f"https://ghcr.io/token?{query}", timeout=30) as response:
+            token = json.load(response)["token"]
+        request = Request(
+            f"https://ghcr.io/v2/{repository}/tags/list?n=1000",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(request, timeout=30) as response:
+            return set(json.load(response).get("tags") or [])
+    except HTTPError as error:
+        if error.code in (401, 403, 404):
+            print(f"{name}: replacement is not publicly pullable (HTTP {error.code})", flush=True)
+            return set()
+        raise
+
+
+def platform_tags(repository, release_tags, arches, read_manifest=inspect):
+    replacements = {arch: set() for arch in arches}
+    for tag in sorted(release_tags):
+        manifest = read_manifest(f"{repository}:{tag}")
+        for descriptor in manifest.get("manifests", []):
+            platform = descriptor.get("platform", {})
+            if platform.get("os") != "linux":
+                continue
+            for arch in arches:
+                cpu, variant = PLATFORMS[arch]
+                if platform.get("architecture") == cpu and (not variant or platform.get("variant") == variant):
+                    replacements[arch].add(tag)
+    return replacements
+
+
 def main():
     owner = os.environ["GITHUB_REPOSITORY_OWNER"]
     month = os.environ["CURRENT_MONTH"]
     versions = json.loads(Path("versions.json").read_text(encoding="utf-8"))
     newest_python = max((release["version"] for release in versions["python"]), key=version_key)
-    for old_name, new_name in zip(package_names(versions, prefix=""), package_names(versions)):
-        replacements = collect_tags(list_versions(versions_endpoint(owner, new_name)))
-        prune(owner, old_name, newest_python, month, replacement_tags=replacements)
-        prune(owner, new_name, newest_python, month, replacement_tags=replacements)
+    for old_name, arches in package_architectures(versions):
+        new_name = f"home-assistant-{old_name}"
+        replacements = public_tags(owner, new_name)
+        if not any(tag.endswith(f"-{month}") for tag in replacements):
+            continue
+        by_platform = platform_tags(f"ghcr.io/{owner.lower()}/{new_name}", replacements, arches)
+        legacy_platforms_retired = True
+        for arch in arches:
+            retired = prune(owner, f"{arch}-{old_name}", newest_python, month, by_platform[arch], retire_package=True)
+            legacy_platforms_retired = legacy_platforms_retired and retired
+        prune(owner, old_name, newest_python, month, replacements, retire_package=legacy_platforms_retired)
+        prune(owner, new_name, newest_python, month)
 
 
 if __name__ == "__main__":

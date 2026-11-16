@@ -97,7 +97,7 @@ jobs:
             | {include: [
                 .[] as $arch
                 | ($targets[$arch] // error("Unsupported architecture: " + $arch))
-                + {arch: $arch, image: "\($prefix)/\($arch)-\($name)"}
+                + {arch: $arch, image: "\($prefix)/\($name)"}
               ]}
           ' <<< "${ARCHITECTURES}")"
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
@@ -173,27 +173,9 @@ jobs:
           [[ "${verified}" == true ]]
           echo "build-arg=BUILD_FROM=${reference}" >> "${GITHUB_OUTPUT}"
 
-      - name: Compute image tags
-        if: inputs.local-alpine-version == ''
-        id: options
-        shell: bash
-        env:
-          IMAGE: ${{ matrix.image }}
-          IMAGE_TAGS: ${{ inputs.image-tags }}
-        run: |
-          {
-            echo "tags<<EOF"
-            while IFS= read -r tag; do
-              if [[ -n "${tag}" ]]; then
-                echo "${IMAGE}:${tag}"
-              fi
-            done <<< "${IMAGE_TAGS}"
-            echo "EOF"
-            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } >> "${GITHUB_OUTPUT}"
-
       - name: Build image
         if: inputs.local-alpine-version == ''
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ${{ inputs.context }}
@@ -202,8 +184,7 @@ jobs:
           pull: true
           provenance: false
           sbom: false
-          tags: ${{ steps.options.outputs.tags }}
-          outputs: ${{ inputs.push && 'type=image,push=true,compression=zstd,compression-level=9,force-compression=true,oci-mediatypes=true' || 'type=cacheonly' }}
+          outputs: ${{ inputs.push && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true,compression=zstd,compression-level=9,force-compression=true,oci-mediatypes=true', matrix.image) || 'type=cacheonly' }}
           cache-from: ${{ inputs.cache-gha && format('type=gha,scope={0}-{1}', matrix.arch, inputs.cache-gha-scope) || '' }}
           cache-to: ${{ inputs.cache-gha && format('type=gha,mode=max,scope={0}-{1}', matrix.arch, inputs.cache-gha-scope) || '' }}
           build-args: |
@@ -218,10 +199,30 @@ jobs:
             io.hass.base.arch=${{ matrix.arch }}
             io.hass.base.version=${{ inputs.version }}
             io.hass.build.run=${{ github.run_id }}
-            org.opencontainers.image.created=${{ steps.options.outputs.created }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ inputs.version }}
             ${{ inputs.labels }}
+
+      - name: Record the published platform digest
+        if: inputs.push
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p manifest-digests
+          printf '%s\n' "${DIGEST}" > "manifest-digests/${ARCH}"
+
+      - name: Upload the platform digest
+        if: inputs.push
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: manifest-${{ inputs.image-name }}-${{ inputs.cache-gha-scope }}-${{ matrix.arch }}
+          path: manifest-digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
 
   manifest:
     name: Publish multi-arch manifest
@@ -244,6 +245,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download this run's platform digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: manifest-${{ inputs.image-name }}-${{ inputs.cache-gha-scope }}-*
+          path: manifest-digests
+          merge-multiple: true
+
       - name: Publish manifest from this run's images
         id: publish
         shell: bash
@@ -257,19 +265,15 @@ jobs:
           mapfile -t tags < <(grep -v '^[[:space:]]*$' <<< "${IMAGE_TAGS}")
           sources=()
           for arch in $(jq -r '.[]' <<< "${ARCHITECTURES}"); do
-            repo="ghcr.io/${OWNER,,}/${arch}-${IMAGE_NAME}"
-            source="${repo}:${tags[0]}"
-            # The monthly tag can still point at an earlier run if this build failed.
-            if descriptor="$(docker buildx imagetools inspect "${source}" --format '{{json .Manifest}}')" &&
-               digest="$(jq -er '.digest' <<< "${descriptor}")" &&
-               config="$(docker buildx imagetools inspect "${repo}@${digest}" --format '{{json .Image}}')" &&
-               jq -e --arg run "${GITHUB_RUN_ID}" '.config.Labels["io.hass.build.run"] == $run' <<< "${config}" > /dev/null; then
-              sources+=("${repo}@${digest}")
+            if [[ -f "manifest-digests/${arch}" ]] &&
+               read -r digest < "manifest-digests/${arch}" &&
+               [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              sources+=("${image}@${digest}")
             elif [[ "${arch}" == amd64 || "${arch}" == aarch64 ]]; then
-              echo "::error::Missing required ${arch} image from this run: ${source}"
+              echo "::error::Missing required ${arch} image from this run for ${image}:${tags[0]}"
               exit 1
             else
-              echo "::warning::Missing ${arch} image from this run: ${source}"
+              echo "::warning::Missing ${arch} image from this run for ${image}:${tags[0]}"
             fi
           done
           if (( ${#sources[@]} == 0 )); then
