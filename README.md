@@ -51,12 +51,16 @@ Notes on the 32-bit variants:
 
 All images are published to `ghcr.io/seb5594/<image>` as multi-arch manifests, so `docker pull` picks the right architecture automatically.
 
+```bash
+docker pull ghcr.io/seb5594/home-assistant-base:3.23
+```
+
 | Image | OS | Tags | `latest` |
 |-------|----|------|----------|
-| `base` | Alpine | `3.22`, `3.23`, `3.24`, `dev` | `3.24` |
-| `base-debian` | Debian | `bookworm`, `trixie`, `dev` | `trixie` |
-| `base-ubuntu` | Ubuntu | `22.04`, `24.04`, `26.04`, `dev` | `26.04` |
-| `base-python` | Alpine | `<python>-alpine<alpine>`, for example `3.14-alpine3.24` | `3.14-alpine3.24` |
+| `home-assistant-base` | Alpine | `3.22`, `3.23`, `3.24`, `dev` | `3.24` |
+| `home-assistant-base-debian` | Debian | `bookworm`, `trixie`, `dev` | `trixie` |
+| `home-assistant-base-ubuntu` | Ubuntu | `22.04`, `24.04`, `26.04`, `dev` | `26.04` |
+| `home-assistant-base-python` | Alpine | `<python>-alpine<alpine>`, for example `3.14-alpine3.24` | `3.14-alpine3.24` |
 
 The table shows the state at the time of writing. [`versions.json`](versions.json) always has the releases that are currently pinned, including the architectures of each one.
 
@@ -65,14 +69,14 @@ Every release is published with these tags:
 | Tag | Meaning |
 |-----|---------|
 | `3.24` | Newest build of this release |
-| `3.24-2026.11.12.57` | A specific build (date and run number, or the release tag for tagged releases) |
+| `3.24-2026.11` | Most recent build of this release in that UTC calendar month |
 | `latest` | The newest stable release |
-| `dev` | The experimental channel, see below. Its builds are tagged `dev-<build>` |
+| `dev` | The experimental channel, see below. Its monthly builds are tagged `dev-YYYY.MM` |
 
-Python images exist for the newest three Python releases, on every stable Alpine release (for example `3.15-alpine3.24`) and on the `dev` channel (`3.15-dev`).
+Python images exist for the newest three Python releases on every stable Alpine release (for example `3.15-alpine3.24`). The `dev` channel combines only the newest Python release with Alpine edge (for example `3.15-dev`).
 `latest` points to the newest Python release that is at least 90 days old, so a fresh release does not become the default right away.
 
-The per-architecture images (`amd64-base`, `armv7-base-python`, …) are building blocks for the manifests. Use the plain names.
+Each tag points to one multi-architecture manifest. The platform builds are stored by digest in the same package.
 
 ### Channels
 
@@ -82,10 +86,10 @@ The `dev` channel is experimental. It is built from the development branch of ea
 
 | Image | `dev` is built from |
 |-------|---------------------|
-| `base` | Alpine `edge` |
-| `base-debian` | Debian `testing` |
-| `base-ubuntu` | Ubuntu `devel`, or `rolling` while no development release is open |
-| `base-python` | the newest three Python releases on Alpine `edge` |
+| `home-assistant-base` | Alpine `edge` |
+| `home-assistant-base-debian` | Debian `testing` |
+| `home-assistant-base-ubuntu` | Ubuntu `devel`, or `rolling` while no development release is open |
+| `home-assistant-base-python` | the newest Python release on Alpine `edge` |
 
 The `dev` images are rebuilt every week and can break when the distribution changes under them. A failing `dev` build does not affect the stable images.
 
@@ -106,8 +110,9 @@ Details:
 - **Pinning.** Alpine, Debian and Ubuntu releases come from [endoflife.date](https://endoflife.date), the architectures from the Docker official images, Python releases from python.org. Only releases that are in support and already published as Docker images are pinned. Debian and Ubuntu follow the same policy as the original: stable and LTS releases that are still in regular or LTS support, without ELTS and ESM.
 - **New Python releases.** When a new Python release appears before the source repository has a Dockerfile for it, one is generated from the newest existing one and marked with `python/<version>/.auto-generated`. It is removed automatically as soon as the source repository ships its own.
 - **Pull requests and pushes** only build the stable releases on `amd64`, `aarch64` and `i386`, to give quick feedback. The slow emulated builds and the `dev` images run on schedule, on release and when started manually.
-- **Python builds.** Runs with publishing disabled build Python on the Alpine Dockerfile from the same checkout. Publishing runs build Python on the signed Alpine image tagged for that run, including `dev` for Alpine edge.
-- **Publishing.** Scheduled builds are tagged `YYYY.MM.DD.<run number>`, releases use their release tag. Images are signed with Cosign.
+- **Python builds.** Runs with publishing disabled build Python on the Alpine Dockerfile from the same checkout. Publishing runs verify the provenance of the Alpine manifest created by that run and build Python against its digest.
+- **Publishing.** Each publish updates the release aliases and the current UTC month's `<release>-YYYY.MM` tag. Signed provenance for the multi-architecture manifests is stored in GitHub Actions. For example, verify an image with `gh attestation verify oci://ghcr.io/seb5594/home-assistant-base:3.24 --repo seb5594/home-assistant-base_all-archs`.
+- **Registry cleanup.** After publishing, the workflow removes superseded daily versions, retired Python dev versions and old Cosign sidecars. It removes the original short-name and per-architecture packages once the corresponding tags and platforms are publicly available in the new packages. Update old pull references to the names in the image table.
 - **Failures.** The ARM variants are best effort: if one of them fails, the remaining architectures are still published and the failed job is visible in the run.
 
 ### Setup for your own fork
@@ -163,7 +168,7 @@ Python 3.14 image, using the Alpine 3.24 base image from GHCR:
 
 ```bash
 docker buildx build \
-  --build-arg BASE_IMAGE=ghcr.io/seb5594/base \
+  --build-arg BASE_IMAGE=ghcr.io/seb5594/home-assistant-base \
   --build-arg BASE_VERSION=3.24 \
   -t base-python:3.14-alpine3.24 \
   python/3.14/
@@ -175,7 +180,7 @@ For another architecture, set the platform. Building for a platform other than t
 # 32-bit ARM (armv7), optimizations disabled to keep the build time reasonable under emulation
 docker buildx build \
   --platform linux/arm/v7 \
-  --build-arg BASE_IMAGE=ghcr.io/seb5594/base \
+  --build-arg BASE_IMAGE=ghcr.io/seb5594/home-assistant-base \
   --build-arg BASE_VERSION=3.24 \
   --build-arg PYTHON_OPTIMIZATIONS= \
   -t base-python:3.14-alpine3.24-armv7 \
@@ -191,7 +196,8 @@ Dieses Repository ist ein Fork von [home-assistant/docker-base](https://github.c
 Was dieser Fork ergänzt:
 
 - **Legacy-Architekturen**, überall dort, wo die Distribution sie noch liefert. Ubuntu bietet nur `armv7`, Debian `bookworm` und `testing` haben kein `armhf`.
-- **Zwei Kanäle**: Standard sind die stabilen Releases. Der experimentelle Kanal `dev` basiert auf Alpine `edge`, Debian `testing` und dem neuesten Ubuntu. Er wird jede Woche neu gebaut und kann brechen, wenn sich die Distribution ändert. Python gibt es dort als `3.15-dev`.
+- **Zwei Kanäle**: Standard sind die stabilen Releases. Der experimentelle Kanal `dev` basiert auf Alpine `edge`, Debian `testing` und dem neuesten Ubuntu. Er wird jede Woche neu gebaut und kann brechen, wenn sich die Distribution ändert. Auf Alpine `edge` läuft jeweils nur die neueste Python-Version, zum Beispiel `3.15-dev`.
+- **Monats-Tags**: Veröffentlichungen aktualisieren pro Release den Tag des UTC-Kalendermonats, zum Beispiel `3.23-2026.11`.
 - **Automatisches Pinning** der neuesten unterstützten Alpine-, Debian- und Ubuntu-LTS-Releases sowie der drei neuesten Python-Versionen in [`versions.json`](versions.json), täglich geprüft.
 - **Abgleich mit dem Quell-Repository**: Neue Komponentenversionen, Patches und Python-Versionen aus `home-assistant/docker-base` werden täglich eingespielt. Eigene Änderungen an den übernommenen Dateien sind bewusst minimal gehalten. Bei einem Konflikt wird nichts gepusht, stattdessen wird ein Issue angelegt.
 - **Wöchentlich neu gebaute Images**, damit Sicherheitsupdates des Betriebssystems enthalten sind.

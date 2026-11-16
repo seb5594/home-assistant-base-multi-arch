@@ -17,6 +17,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || inputs.publish) && 'publish-base-images' || format('build-base-images-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   init:
     name: Initialize build
@@ -42,24 +46,18 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PUBLISH: ${{ inputs.publish }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
+          month="$(date -u +%Y.%m)"
           # fast: only stable releases on the architectures that build quickly. Used for
           # pushes and pull requests, the slow emulated builds run on schedule and release.
           case "${EVENT_NAME}" in
-            release)
-              version="${RELEASE_TAG}"
-              push=true
-              fast=false
-              ;;
-            schedule)
-              version="$(date -u +%Y.%m.%d).${RUN_NUMBER}"
+            release|schedule)
+              version="${month}"
               push=true
               fast=false
               ;;
             workflow_dispatch)
-              version="$(date -u +%Y.%m.%d).${RUN_NUMBER}"
+              version="${month}"
               push="${PUBLISH}"
               fast=false
               ;;
@@ -99,6 +97,7 @@ jobs:
               map(.architectures |= tojson);
 
             (.alpine | prepare) as $alpine
+            | (.python | max_by(.version | split(".") | map(tonumber)) | .version) as $newest_python
             | {
                 alpine: {include: ($alpine | stringify_architectures)},
                 debian: {include: (.debian | prepare | stringify_architectures)},
@@ -106,6 +105,7 @@ jobs:
                 python: {include: [
                   .python[] as $python
                   | $alpine[]
+                  | select((.dev | not) or $python.version == $newest_python)
                   | {
                       python_version: $python.version,
                       alpine_version: .version,
@@ -136,7 +136,8 @@ jobs:
       matrix: ${{ fromJSON(needs.init.outputs.alpine_matrix) }}
     permissions:
       contents: read
-      id-token: write # For cosign signing
+      attestations: write
+      id-token: write
       packages: write # For pushing to registry
     uses: ./.github/workflows/build-base-image.yml
     with:
@@ -144,9 +145,8 @@ jobs:
       build-args: |
         ALPINE_VERSION=${{ matrix.version }}
       cache-gha-scope: alpine-${{ matrix.version }}
-      cache-image-tag: ${{ matrix.tag }}
       context: alpine
-      image-name: base
+      image-name: home-assistant-base
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
@@ -164,7 +164,8 @@ jobs:
       matrix: ${{ fromJSON(needs.init.outputs.debian_matrix) }}
     permissions:
       contents: read
-      id-token: write # For cosign signing
+      attestations: write
+      id-token: write
       packages: write # For pushing to registry
     uses: ./.github/workflows/build-base-image.yml
     with:
@@ -172,9 +173,8 @@ jobs:
       build-args: |
         DEBIAN_VERSION=${{ matrix.version }}
       cache-gha-scope: debian-${{ matrix.version }}
-      cache-image-tag: ${{ matrix.tag }}
       context: debian
-      image-name: base-debian
+      image-name: home-assistant-base-debian
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
@@ -192,7 +192,8 @@ jobs:
       matrix: ${{ fromJSON(needs.init.outputs.ubuntu_matrix) }}
     permissions:
       contents: read
-      id-token: write # For cosign signing
+      attestations: write
+      id-token: write
       packages: write # For pushing to registry
     uses: ./.github/workflows/build-base-image.yml
     with:
@@ -200,9 +201,8 @@ jobs:
       build-args: |
         UBUNTU_VERSION=${{ matrix.version }}
       cache-gha-scope: ubuntu-${{ matrix.version }}
-      cache-image-tag: ${{ matrix.tag }}
       context: ubuntu
-      image-name: base-ubuntu
+      image-name: home-assistant-base-ubuntu
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
@@ -222,29 +222,52 @@ jobs:
       matrix: ${{ fromJSON(needs.init.outputs.python_matrix) }}
     permissions:
       contents: read
-      id-token: write # For cosign signing
+      attestations: write
+      id-token: write
       packages: write # For pushing to registry
     uses: ./.github/workflows/build-base-image.yml
     with:
       architectures: ${{ matrix.architectures }}
-      build-args: |
-        BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/base
-        BASE_VERSION=${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
       cache-gha-scope: python-${{ matrix.python_version }}-alpine${{ matrix.alpine_version }}
-      cache-image-tag: ${{ matrix.tag }}
       context: python/${{ matrix.python_version }}
-      cosign-base-identity: "https://github.com/${{ github.repository }}/.*"
-      cosign-base-verify: ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
+      published-base: ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
       # Profile-guided and link-time optimization take hours under CPU emulation
       emulated-build-args: |
         PYTHON_OPTIMIZATIONS=
-      image-name: base-python
+      image-name: home-assistant-base-python
       image-tags: |
         ${{ matrix.tag }}-${{ needs.init.outputs.version }}
         ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
-        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
+        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
       local-alpine-version: ${{ needs.init.outputs.push != 'true' && matrix.alpine_version || '' }}
       push: ${{ needs.init.outputs.push == 'true' }}
       version: ${{ needs.init.outputs.version }}
+
+  prune_legacy_tags:
+    name: Remove retired GHCR versions
+    if: ${{ !cancelled() && needs.init.outputs.push == 'true' }}
+    needs: [init, build_alpine, build_debian, build_ubuntu, build_python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove superseded tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_MONTH: ${{ needs.init.outputs.version }}
+        run: python3 -I scripts/prune_ghcr_tags.py
