@@ -121,7 +121,7 @@ jobs:
         if: steps.release.outputs.pending == '' && steps.push.outputs.images_changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run builder.yml --ref "${GITHUB_REF_NAME}" -f publish=true
+        run: gh workflow run builder.yml --repo "${GITHUB_REPOSITORY}" --ref "${GITHUB_REF_NAME}" -f publish=true
 
       - name: Build the pending upstream release
         if: steps.sync.outputs.conflict != 'true' && steps.release.outputs.pending != ''
@@ -139,7 +139,7 @@ jobs:
             -f branch="${RELEASE}" -f event=workflow_dispatch \
             --jq '[.workflow_runs[] | select(.status != "completed")] | length')"
           if [[ "${active}" == 0 ]]; then
-            gh workflow run builder.yml --ref "${RELEASE}" -f publish=true -f release_tag="${RELEASE}"
+            gh workflow run builder.yml --repo "${GITHUB_REPOSITORY}" --ref "${RELEASE}" -f publish=true -f release_tag="${RELEASE}"
           else
             echo "The build for ${RELEASE} is already pending"
           fi
@@ -150,7 +150,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           title="Upstream sync needs manual merge"
-          if [[ -z "$(gh issue list --state open --search "${title} in:title" --json number --jq '.[].number')" ]]; then
-            gh issue create --title "${title}" --body "The automatic merge of home-assistant/docker-base failed. See the [workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) for the release tag and conflicting files."
+          if [[ -z "$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --search "${title} in:title" --json number --jq '.[].number')" ]]; then
+            gh issue create --repo "${GITHUB_REPOSITORY}" --title "${title}" --body "The automatic merge of home-assistant/docker-base failed. See the [workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) for the release tag and conflicting files."
           fi
           exit 1
