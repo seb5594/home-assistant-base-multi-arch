@@ -43,7 +43,7 @@ on:
         required: true
         type: string
       image-tags:
-        description: Image tags, one per line, with the monthly tag first
+        description: Image tags, one per line
         required: true
         type: string
       labels:

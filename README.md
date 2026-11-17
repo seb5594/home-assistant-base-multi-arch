@@ -17,7 +17,7 @@ The images include [S6-Overlay](https://github.com/just-containers/s6-overlay),
 - **Legacy architectures** `armv7`, `armhf` and `i386` next to `amd64` and `aarch64`, wherever the distribution still provides them.
 - **Two channels**: the stable releases are the default, the experimental `dev` channel follows Alpine `edge`, Debian `testing` and the newest Ubuntu (`devel` or `rolling`).
 - **Automatic version pinning**: the newest supported Alpine, Debian and Ubuntu LTS releases and the newest three Python releases are detected and pinned in [`versions.json`](versions.json) every day.
-- **Upstream sync**: new Home Assistant component versions, patches and Python releases from the source repository are merged in every day.
+- **Upstream sync**: new stable releases of the source repository are checked daily and merged by tag.
 - **Prebuilt packages** on GHCR, rebuilt every week to include operating system security updates.
 
 ## Supported architectures
@@ -69,9 +69,9 @@ Every release is published with these tags:
 | Tag | Meaning |
 |-----|---------|
 | `3.24` | Newest build of this release |
-| `3.24-2026.11` | Most recent build of this release in that UTC calendar month |
+| `3.24-2026.11.0` | Alpine 3.24 image for the upstream docker-base release `2026.11.0` |
 | `latest` | The newest stable release |
-| `dev` | The experimental channel, see below. Its monthly builds are tagged `dev-YYYY.MM` |
+| `dev` | The experimental channel. Release builds also get a tag such as `dev-2026.11.0` |
 
 Python images exist for the newest three Python releases on every stable Alpine release (for example `3.15-alpine3.24`). The `dev` channel combines only the newest Python release with Alpine edge (for example `3.15-dev`).
 `latest` points to the newest Python release that is at least 90 days old, so a fresh release does not become the default right away.
@@ -101,7 +101,7 @@ The Alpine images include jemalloc. To enable it for an application, set `LD_PRE
 
 | Workflow | When | What it does |
 |----------|------|--------------|
-| `update.yml` | daily | Merges the source repository, runs [`scripts/resolve_versions.py`](scripts/resolve_versions.py) to refresh `versions.json`, pushes the result and starts a publishing build when images are affected |
+| `update.yml` | daily | Checks for the next stable release of `home-assistant/docker-base`, merges its tagged source, refreshes `versions.json` and starts publication from the matching fork tag |
 | `builder.yml` | weekly, on release, manually, on push and pull request | Builds all pinned releases on all their architectures. Publishes on schedule, release and when started with `publish` enabled |
 | `build-base-image.yml` | called by `builder.yml` | Builds one image for all its architectures and publishes the multi-arch manifest |
 
@@ -111,19 +111,19 @@ Details:
 - **New Python releases.** When a new Python release appears before the source repository has a Dockerfile for it, one is generated from the newest existing one and marked with `python/<version>/.auto-generated`. It is removed automatically as soon as the source repository ships its own.
 - **Pull requests and pushes** only build the stable releases on `amd64`, `aarch64` and `i386`, to give quick feedback. The slow emulated builds and the `dev` images run on schedule, on release and when started manually.
 - **Python builds.** Runs with publishing disabled build Python on the Alpine Dockerfile from the same checkout. Publishing runs verify the provenance of the Alpine manifest created by that run and build Python against its digest.
-- **Publishing.** Each publish updates the release aliases and the current UTC month's `<release>-YYYY.MM` tag. Signed provenance for the multi-architecture manifests is stored in GitHub Actions. For example, verify an image with `gh attestation verify oci://ghcr.io/seb5594/home-assistant-base:3.24 --repo seb5594/home-assistant-base_all-archs`.
-- **Registry cleanup.** After publishing, the workflow removes superseded daily versions, retired Python dev versions and old Cosign sidecars. It removes the original short-name and per-architecture packages once the corresponding tags and platforms are publicly available in the new packages. Update old pull references to the names in the image table.
+- **Publishing.** Stable upstream releases get the same GitHub release tag in the fork and the full upstream version as a suffix on GHCR, for example `3.23-2026.11.0`. The fork release is published after the images succeed. Weekly and regular manual runs refresh the moving aliases. Signed provenance is stored in GitHub Actions and can be checked with `gh attestation verify oci://ghcr.io/seb5594/home-assistant-base:3.23-2026.11.0 --repo seb5594/home-assistant-base_all-archs`.
+- **Registry cleanup.** Release builds remove obsolete monthly or daily tags once their release-tagged counterparts exist. The cleanup also handles retired Python dev builds, old Cosign sidecars and superseded packages.
 - **Failures.** The ARM variants are best effort: if one of them fails, the remaining architectures are still published and the failed job is visible in the run.
 
 ### Setup for your own fork
 
-1. Enable GitHub Actions and run `Build base images` with `publish` enabled to publish the first set of images.
+1. Enable GitHub Actions and run `Sync upstream and update pins` to start the first release build.
 2. Add a repository secret `SYNC_TOKEN` with a personal access token that has the `repo` and `workflow` scopes. The default token cannot push changes to `.github/workflows`, which merging the source repository can involve.
 3. In the package settings of the images, link them to the repository and set the visibility you want.
 
 ## Staying in sync with the source repository
 
-`update.yml` merges `home-assistant/docker-base` into this fork every day, so new component versions of S6-Overlay, Bashio, TempIO and jemalloc, new patches and new Python releases arrive without manual work.
+`update.yml` checks the stable releases of `home-assistant/docker-base` every day. It merges the selected release tag into this fork so new component versions, patches and Python Dockerfiles ship with the matching upstream version.
 
 To keep merges conflict free, the fork changes the upstream files as little as possible. Only the architecture handling of the Dockerfiles and the Python optimization flag differ. The workflows `builder.yml` and `build-base-image.yml` and this README are owned by the fork, so changes to them upstream are not merged. If a merge does conflict anywhere else, nothing is pushed and an issue is opened.
 
@@ -197,7 +197,7 @@ Was dieser Fork ergänzt:
 
 - **Legacy-Architekturen**, überall dort, wo die Distribution sie noch liefert. Ubuntu bietet nur `armv7`, Debian `bookworm` und `testing` haben kein `armhf`.
 - **Zwei Kanäle**: Standard sind die stabilen Releases. Der experimentelle Kanal `dev` basiert auf Alpine `edge`, Debian `testing` und dem neuesten Ubuntu. Er wird jede Woche neu gebaut und kann brechen, wenn sich die Distribution ändert. Auf Alpine `edge` läuft jeweils nur die neueste Python-Version, zum Beispiel `3.15-dev`.
-- **Monats-Tags**: Veröffentlichungen aktualisieren pro Release den Tag des UTC-Kalendermonats, zum Beispiel `3.23-2026.11`.
+- **Release-Tags**: Neue stabile Releases von `home-assistant/docker-base` werden täglich erkannt und mit exakt derselben Version veröffentlicht. Der passende GHCR-Tag lautet zum Beispiel `3.23-2026.11.0`.
 - **Automatisches Pinning** der neuesten unterstützten Alpine-, Debian- und Ubuntu-LTS-Releases sowie der drei neuesten Python-Versionen in [`versions.json`](versions.json), täglich geprüft.
 - **Abgleich mit dem Quell-Repository**: Neue Komponentenversionen, Patches und Python-Versionen aus `home-assistant/docker-base` werden täglich eingespielt. Eigene Änderungen an den übernommenen Dateien sind bewusst minimal gehalten. Bei einem Konflikt wird nichts gepusht, stattdessen wird ein Issue angelegt.
 - **Wöchentlich neu gebaute Images**, damit Sicherheitsupdates des Betriebssystems enthalten sind.

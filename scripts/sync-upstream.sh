@@ -14,10 +14,16 @@ set -euo pipefail
 UPSTREAM_REPO="${UPSTREAM_REPO:-home-assistant/docker-base}"
 UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-master}"
 UPSTREAM_REF="upstream/${UPSTREAM_BRANCH}"
+if [[ -n "${UPSTREAM_RELEASE:-}" ]]; then
+  UPSTREAM_REF="refs/upstream/releases/${UPSTREAM_RELEASE}"
+fi
 
 OWNED_FILES=(
+  .github/release-drafter.yml
   .github/workflows/build-base-image.yml
   .github/workflows/builder.yml
+  .github/workflows/release-drafter.yml
+  .github/workflows/update.yml
   README.md
 )
 
@@ -25,7 +31,11 @@ ensure_upstream_remote() {
   if ! git remote get-url upstream > /dev/null 2>&1; then
     git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
   fi
-  git fetch --quiet upstream "${UPSTREAM_BRANCH}"
+  if [[ -n "${UPSTREAM_RELEASE:-}" ]]; then
+    git fetch --quiet --no-tags upstream "refs/tags/${UPSTREAM_RELEASE}:${UPSTREAM_REF}"
+  else
+    git fetch --quiet upstream "${UPSTREAM_BRANCH}"
+  fi
 }
 
 # Remove generated Python directories that upstream provides itself now.
@@ -45,21 +55,27 @@ drop_adopted_python_dirs() {
 restore_owned_files() {
   local file
   for file in "${OWNED_FILES[@]}"; do
-    git checkout HEAD -- "${file}"
+    if git cat-file -e "HEAD:${file}" 2>/dev/null; then
+      git checkout HEAD -- "${file}"
+    else
+      git rm --quiet --force --ignore-unmatch -- "${file}"
+    fi
   done
 }
 
 ensure_upstream_remote
 
 if git merge-base --is-ancestor "${UPSTREAM_REF}" HEAD; then
-  echo "Already up to date with ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}"
+  echo "Already up to date with ${UPSTREAM_REPO}@${UPSTREAM_RELEASE:-${UPSTREAM_BRANCH}}"
   exit 0
 fi
 
 drop_adopted_python_dirs
 
 upstream_sha="$(git rev-parse --short "${UPSTREAM_REF}")"
-git merge --no-ff --no-commit "${UPSTREAM_REF}" || true
+if ! git merge --no-ff --no-commit "${UPSTREAM_REF}"; then
+  git rev-parse --verify --quiet MERGE_HEAD > /dev/null || exit 1
+fi
 restore_owned_files
 
 unresolved="$(git diff --name-only --diff-filter=U)"
