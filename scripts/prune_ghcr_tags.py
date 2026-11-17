@@ -12,7 +12,8 @@ from urllib.request import Request, urlopen
 
 
 DAILY_TAG = re.compile(r"(.+-\d{4}\.\d{2})\.\d{2}\.\d+")
-PYTHON_DEV_TAG = re.compile(r"(\d+\.\d+)-dev(?:-\d{4}\.\d{2}(?:\.\d{2}\.\d+)?)?")
+MONTHLY_TAG = re.compile(r".+-\d{4}\.\d{2}")
+PYTHON_DEV_TAG = re.compile(r"(\d+\.\d+)-dev(?:-\d{4}\.\d{2}(?:\.\d+){0,2})?")
 COSIGN_TAG = re.compile(r"sha256-([a-f0-9]{64})(?:\.(sig|att))?")
 SIGSTORE_BUNDLE = "application/vnd.dev.sigstore.bundle.v0.3+json"
 PLATFORMS = {
@@ -40,13 +41,18 @@ def version_key(version):
     return tuple(map(int, version.split(".")))
 
 
-def obsolete_tag(tag, existing_tags, is_python, newest_python, month):
-    """Keep the current aliases and any daily tag without a monthly replacement."""
+def obsolete_tag(tag, existing_tags, is_python, newest_python, release):
+    """Keep aliases and legacy tags without a matching upstream release image."""
     dev = PYTHON_DEV_TAG.fullmatch(tag) if is_python else None
     if dev and version_key(dev[1]) < version_key(newest_python):
-        return f"{newest_python}-dev-{month}" in existing_tags
+        return f"{newest_python}-dev-{release}" in existing_tags
     daily = DAILY_TAG.fullmatch(tag)
-    return bool(daily and daily[1] in existing_tags)
+    month_tag = daily[1] if daily else tag
+    month = release.rsplit(".", 1)[0]
+    if not MONTHLY_TAG.fullmatch(month_tag) or not month_tag.endswith(f"-{month}"):
+        return False
+    replacement = f"{month_tag.rsplit('-', 1)[0]}-{release}"
+    return replacement in existing_tags
 
 
 def inspect(reference):
@@ -135,14 +141,14 @@ def list_versions(endpoint):
         page += 1
 
 
-def prune(owner, name, newest_python, month, replacement_tags=None, retire_package=False):
+def prune(owner, name, newest_python, release, replacement_tags=None, retire_package=False):
     endpoint = versions_endpoint(owner, name)
     versions = list_versions(endpoint)
     if not versions:
         return True
     existing_tags = collect_tags(versions) if replacement_tags is None else replacement_tags
-    if not any(tag.endswith(f"-{month}") for tag in existing_tags):
-        print(f"{name}: waiting for a monthly image", flush=True)
+    if not any(tag.endswith(f"-{release}") for tag in existing_tags):
+        print(f"{name}: waiting for a release image", flush=True)
         return False
     repository = f"ghcr.io/{owner.lower()}/{name}"
     is_python = name.endswith("base-python")
@@ -150,7 +156,7 @@ def prune(owner, name, newest_python, month, replacement_tags=None, retire_packa
         legacy_tags = collect_tags(versions)
         sidecar_tags = {tag for tag in legacy_tags if COSIGN_TAG.fullmatch(tag)}
         covered = all(
-            tag in existing_tags or obsolete_tag(tag, existing_tags, is_python, newest_python, month)
+            tag in existing_tags or obsolete_tag(tag, existing_tags, is_python, newest_python, release)
             for tag in legacy_tags - sidecar_tags
         )
         if (
@@ -174,7 +180,7 @@ def prune(owner, name, newest_python, month, replacement_tags=None, retire_packa
         version_tags = tags(version)
         if not version_tags:
             continue
-        if all(obsolete_tag(tag, existing_tags, is_python, newest_python, month) for tag in version_tags):
+        if all(obsolete_tag(tag, existing_tags, is_python, newest_python, release) for tag in version_tags):
             candidates.append(version)
         elif all(COSIGN_TAG.fullmatch(tag) for tag in version_tags):
             sidecars = [cosign_sidecar(repository, tag) for tag in version_tags]
@@ -245,21 +251,21 @@ def platform_tags(repository, release_tags, arches, read_manifest=inspect):
 
 def main():
     owner = os.environ["GITHUB_REPOSITORY_OWNER"]
-    month = os.environ["CURRENT_MONTH"]
+    release = os.environ["CURRENT_RELEASE"]
     versions = json.loads(Path("versions.json").read_text(encoding="utf-8"))
     newest_python = max((release["version"] for release in versions["python"]), key=version_key)
     for old_name, arches in package_architectures(versions):
         new_name = f"home-assistant-{old_name}"
         replacements = public_tags(owner, new_name)
-        if not any(tag.endswith(f"-{month}") for tag in replacements):
+        if not any(tag.endswith(f"-{release}") for tag in replacements):
             continue
         by_platform = platform_tags(f"ghcr.io/{owner.lower()}/{new_name}", replacements, arches)
         legacy_platforms_retired = True
         for arch in arches:
-            retired = prune(owner, f"{arch}-{old_name}", newest_python, month, by_platform[arch], retire_package=True)
+            retired = prune(owner, f"{arch}-{old_name}", newest_python, release, by_platform[arch], retire_package=True)
             legacy_platforms_retired = legacy_platforms_retired and retired
-        prune(owner, old_name, newest_python, month, replacements, retire_package=legacy_platforms_retired)
-        prune(owner, new_name, newest_python, month)
+        prune(owner, old_name, newest_python, release, replacements, retire_package=legacy_platforms_retired)
+        prune(owner, new_name, newest_python, release)
 
 
 if __name__ == "__main__":

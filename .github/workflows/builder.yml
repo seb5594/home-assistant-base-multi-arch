@@ -16,6 +16,10 @@ on:
         description: Push the built images to GitHub Container Registry
         type: boolean
         default: false
+      release_tag:
+        description: Publish the matching stable docker-base release from its fork tag
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || inputs.publish) && 'publish-base-images' || format('build-base-images-{0}', github.run_id) }}
@@ -30,6 +34,8 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       push: ${{ steps.meta.outputs.push }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_suffix: ${{ steps.meta.outputs.release_suffix }}
       alpine_matrix: ${{ steps.matrices.outputs.alpine }}
       debian_matrix: ${{ steps.matrices.outputs.debian }}
       ubuntu_matrix: ${{ steps.matrices.outputs.ubuntu }}
@@ -46,32 +52,50 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PUBLISH: ${{ inputs.publish }}
+          REQUESTED_RELEASE: ${{ inputs.release_tag }}
+          PUBLISHED_RELEASE: ${{ github.event.release.tag_name }}
         run: |
-          month="$(date -u +%Y.%m)"
+          release_tag=""
           # fast: only stable releases on the architectures that build quickly. Used for
           # pushes and pull requests, the slow emulated builds run on schedule and release.
           case "${EVENT_NAME}" in
-            release|schedule)
-              version="${month}"
+            release)
+              release_tag="${PUBLISHED_RELEASE}"
+              push=true
+              fast=false
+              ;;
+            schedule)
               push=true
               fast=false
               ;;
             workflow_dispatch)
-              version="${month}"
               push="${PUBLISH}"
               fast=false
+              release_tag="${REQUESTED_RELEASE}"
               ;;
             *)
-              version="${GITHUB_SHA::7}"
               push=false
               fast=true
               ;;
           esac
+          version="${GITHUB_SHA::7}"
+          suffix=""
+          if [[ -n "${release_tag}" ]]; then
+            if [[ ! "${release_tag}" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+$ ||
+                  "${GITHUB_REF}" != "refs/tags/${release_tag}" || "${push}" != true ]]; then
+              echo "::error::Release builds must publish from the matching stable release tag"
+              exit 1
+            fi
+            version="${release_tag}"
+            suffix="-${release_tag}"
+          fi
 
           {
             echo "version=${version}"
             echo "push=${push}"
             echo "fast=${fast}"
+            echo "release_tag=${release_tag}"
+            echo "release_suffix=${suffix}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Create build matrices from versions.json
@@ -148,7 +172,7 @@ jobs:
       context: alpine
       image-name: home-assistant-base
       image-tags: |
-        ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ needs.init.outputs.release_suffix && format('{0}{1}', matrix.tag, needs.init.outputs.release_suffix) || '' }}
         ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
@@ -176,7 +200,7 @@ jobs:
       context: debian
       image-name: home-assistant-base-debian
       image-tags: |
-        ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ needs.init.outputs.release_suffix && format('{0}{1}', matrix.tag, needs.init.outputs.release_suffix) || '' }}
         ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
@@ -204,7 +228,7 @@ jobs:
       context: ubuntu
       image-name: home-assistant-base-ubuntu
       image-tags: |
-        ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ needs.init.outputs.release_suffix && format('{0}{1}', matrix.tag, needs.init.outputs.release_suffix) || '' }}
         ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
@@ -230,24 +254,51 @@ jobs:
       architectures: ${{ matrix.architectures }}
       cache-gha-scope: python-${{ matrix.python_version }}-alpine${{ matrix.alpine_version }}
       context: python/${{ matrix.python_version }}
-      published-base: ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
+      published-base: ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}${{ needs.init.outputs.release_suffix }}
       # Profile-guided and link-time optimization take hours under CPU emulation
       emulated-build-args: |
         PYTHON_OPTIMIZATIONS=
       image-name: home-assistant-base-python
       image-tags: |
-        ${{ matrix.tag }}-${{ needs.init.outputs.version }}
+        ${{ needs.init.outputs.release_suffix && format('{0}{1}', matrix.tag, needs.init.outputs.release_suffix) || '' }}
         ${{ matrix.tag }}
         ${{ matrix.latest && 'latest' || '' }}
       labels: |
-        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}-${{ needs.init.outputs.version }}
+        io.hass.base.image=ghcr.io/${{ github.repository_owner }}/home-assistant-base:${{ matrix.alpine_tag }}${{ needs.init.outputs.release_suffix }}
       local-alpine-version: ${{ needs.init.outputs.push != 'true' && matrix.alpine_version || '' }}
       push: ${{ needs.init.outputs.push == 'true' }}
       version: ${{ needs.init.outputs.version }}
 
+  publish_release:
+    name: Publish GitHub release
+    if: github.event_name == 'workflow_dispatch' && needs.init.outputs.release_tag != ''
+    needs: [init, build_alpine, build_debian, build_ubuntu, build_python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the matching upstream version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.init.outputs.release_tag }}
+        run: |
+          notes="Multi-architecture base images built from [home-assistant/docker-base ${RELEASE}](https://github.com/home-assistant/docker-base/releases/tag/${RELEASE}). Published image tags end in -${RELEASE}."
+          state="$(gh release view "${RELEASE}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft' 2>/dev/null)" || state=""
+          case "${state}" in
+            true)
+              gh release edit "${RELEASE}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest --title "${RELEASE}" --notes "${notes}"
+              ;;
+            false)
+              echo "Release ${RELEASE} already published"
+              ;;
+            *)
+              gh release create "${RELEASE}" --repo "${GITHUB_REPOSITORY}" --verify-tag --latest --title "${RELEASE}" --notes "${notes}"
+              ;;
+          esac
+
   prune_legacy_tags:
     name: Remove retired GHCR versions
-    if: ${{ !cancelled() && needs.init.outputs.push == 'true' }}
+    if: ${{ !cancelled() && needs.init.outputs.release_tag != '' }}
     needs: [init, build_alpine, build_debian, build_ubuntu, build_python]
     runs-on: ubuntu-latest
     permissions:
@@ -269,5 +320,5 @@ jobs:
       - name: Remove superseded tags
         env:
           GH_TOKEN: ${{ github.token }}
-          CURRENT_MONTH: ${{ needs.init.outputs.version }}
+          CURRENT_RELEASE: ${{ needs.init.outputs.release_tag }}
         run: python3 -I scripts/prune_ghcr_tags.py

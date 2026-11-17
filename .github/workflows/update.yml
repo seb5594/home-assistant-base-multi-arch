@@ -1,10 +1,9 @@
 name: Sync upstream and update pins
 
 # Keeps the fork current in two steps:
-#   1. Merge home-assistant/docker-base (new Home Assistant component versions,
-#      Python releases, patches).
+#   1. Merge the selected stable release tag from home-assistant/docker-base.
 #   2. Pin the newest Alpine, Debian, Ubuntu and Python releases in versions.json.
-# When something that affects the images changed, a publishing build is started.
+# Dispatch a build on the matching fork tag for each new upstream release.
 #
 # Pushing changes to .github/workflows needs a token with the "workflow" scope.
 # Add it as the repository secret SYNC_TOKEN, the default token cannot do that.
@@ -24,6 +23,7 @@ permissions:
 jobs:
   update:
     name: Update
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     permissions:
       actions: write # Start the publishing build
@@ -41,8 +41,44 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Select the next stable upstream release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          filter='.[] | select((.draft or .prerelease) | not) | .tag_name | select(test("^[0-9]{4}\\.[0-9]{2}\\.[0-9]+$"))'
+          upstream="$(gh api --paginate repos/home-assistant/docker-base/releases --jq "${filter}" | sort -Vu)"
+          published="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" --jq "${filter}" | sort -Vu)"
+          if [[ -z "${upstream}" ]]; then
+            echo "::error::No stable docker-base releases found"
+            exit 1
+          fi
+
+          latest="$(tail -n 1 <<< "${published}")"
+          if [[ -n "${latest}" ]]; then
+            # Process releases in order, even if several appeared between polls.
+            next="$(printf '%s\n%s\n' "${latest}" "${upstream}" | sort -Vu |
+              awk -v latest="${latest}" '$0 == latest { seen = 1; next } seen && !emitted { print; emitted = 1 }')"
+          else
+            # Bootstrap at the latest upstream release, or retry the pinned first release.
+            tags="$(git tag --sort=version:refname)"
+            pending=""
+            while IFS= read -r tag; do
+              if grep -Fxq "${tag}" <<< "${upstream}"; then
+                pending="${tag}"
+                break
+              fi
+            done <<< "${tags}"
+            next="${pending:-$(tail -n 1 <<< "${upstream}")}"
+          fi
+
+          echo "target=${next:-${latest}}" >> "${GITHUB_OUTPUT}"
+          echo "pending=${next}" >> "${GITHUB_OUTPUT}"
+
       - name: Merge upstream
         id: sync
+        env:
+          UPSTREAM_RELEASE: ${{ steps.release.outputs.target }}
         run: |
           before="$(git rev-parse HEAD)"
           echo "before=${before}" >> "${GITHUB_OUTPUT}"
@@ -82,10 +118,31 @@ jobs:
           fi
 
       - name: Publish new images
-        if: steps.push.outputs.images_changed == 'true'
+        if: steps.release.outputs.pending == '' && steps.push.outputs.images_changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run builder.yml --ref "${GITHUB_REF_NAME}" -f publish=true
+
+      - name: Build the pending upstream release
+        if: steps.sync.outputs.conflict != 'true' && steps.release.outputs.pending != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ steps.release.outputs.pending }}
+        run: |
+          if ! git show-ref --verify --quiet "refs/tags/${RELEASE}"; then
+            git tag "${RELEASE}"
+            git push origin "refs/tags/${RELEASE}"
+          fi
+          git merge-base --is-ancestor "refs/upstream/releases/${RELEASE}" "refs/tags/${RELEASE}"
+
+          active="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/builder.yml/runs" \
+            -f branch="${RELEASE}" -f event=workflow_dispatch \
+            --jq '[.workflow_runs[] | select(.status != "completed")] | length')"
+          if [[ "${active}" == 0 ]]; then
+            gh workflow run builder.yml --ref "${RELEASE}" -f publish=true -f release_tag="${RELEASE}"
+          else
+            echo "The build for ${RELEASE} is already pending"
+          fi
 
       - name: Report merge conflicts
         if: steps.sync.outputs.conflict == 'true'
@@ -94,6 +151,6 @@ jobs:
         run: |
           title="Upstream sync needs manual merge"
           if [[ -z "$(gh issue list --state open --search "${title} in:title" --json number --jq '.[].number')" ]]; then
-            gh issue create --title "${title}" --body "The automatic merge of home-assistant/docker-base failed, see the [workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) for the conflicting files. Merge \`upstream/master\` manually and resolve them."
+            gh issue create --title "${title}" --body "The automatic merge of home-assistant/docker-base failed. See the [workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) for the release tag and conflicting files."
           fi
           exit 1

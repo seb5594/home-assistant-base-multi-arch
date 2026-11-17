@@ -12,7 +12,7 @@ class PruneTagsTest(unittest.TestCase):
     def test_preserves_aliases_and_versions_without_replacement(self):
         versions = [
             package_version(1, "3.23", "3.23-2026.11.16.8"),
-            package_version(2, "3.23-2026.11"),
+            package_version(2, "3.23-2026.11.0"),
             package_version(3, "3.23-2026.11.15.7"),
             package_version(4, "3.24-2026.11.15.7"),
         ]
@@ -21,18 +21,18 @@ class PruneTagsTest(unittest.TestCase):
             patch.object(cleanup, "list_versions", return_value=versions),
             patch.object(cleanup, "request", side_effect=[versions[2], None]) as request,
         ):
-            cleanup.prune("owner", "base", "3.15", "2026.11")
+            cleanup.prune("owner", "base", "3.15", "2026.11.0")
         endpoint = "https://api.example.test/users/owner/packages/container/base/versions/3"
         self.assertEqual(request.call_args_list, [call(endpoint), call(endpoint, "DELETE")])
 
-    def test_uses_monthly_tags_from_the_renamed_package_for_cleanup(self):
-        old = package_version(3, "3.23-2026.11.15.7")
+    def test_uses_release_tags_from_the_renamed_package_for_cleanup(self):
+        old = package_version(3, "3.23-2026.11")
         with (
             patch.dict(cleanup.os.environ, {"GITHUB_API_URL": "https://api.example.test"}),
             patch.object(cleanup, "list_versions", return_value=[old]),
             patch.object(cleanup, "request", side_effect=[old, None]) as request,
         ):
-            cleanup.prune("owner", "base", "3.15", "2026.11", {"3.23-2026.11"})
+            cleanup.prune("owner", "base", "3.15", "2026.11.0", {"3.23-2026.11.0"})
         endpoint = "https://api.example.test/users/owner/packages/container/base/versions/3"
         self.assertEqual(request.call_args_list, [call(endpoint), call(endpoint, "DELETE")])
 
@@ -40,22 +40,26 @@ class PruneTagsTest(unittest.TestCase):
         old = package_version(3, "3.23", "3.23-2026.11.15.7")
         endpoint = "https://api.example.test/users/owner/packages/container/base"
         for replacements, expected in (
-            ({"3.23-2026.11"}, []),
-            ({"3.23", "3.23-2026.11"}, [call(endpoint, "DELETE")]),
+            ({"3.23-2026.11.0"}, []),
+            ({"3.23", "3.23-2026.11.0"}, [call(endpoint, "DELETE")]),
         ):
             with (
                 patch.dict(cleanup.os.environ, {"GITHUB_API_URL": "https://api.example.test"}),
                 patch.object(cleanup, "list_versions", return_value=[old]),
                 patch.object(cleanup, "request") as request,
             ):
-                cleanup.prune("owner", "base", "3.15", "2026.11", replacements, retire_package=True)
+                cleanup.prune("owner", "base", "3.15", "2026.11.0", replacements, retire_package=True)
             self.assertEqual(request.call_args_list, expected)
 
     def test_retires_older_python_dev_after_the_replacement_exists(self):
-        for tag in ("3.9-dev", "3.9-dev-2026.11.16.8", "3.9-dev-2026.11"):
-            self.assertTrue(cleanup.obsolete_tag(tag, {"3.15-dev-2026.11"}, True, "3.15", "2026.11"))
-            self.assertFalse(cleanup.obsolete_tag(tag, {"3.15-dev"}, True, "3.15", "2026.11"))
-        self.assertFalse(cleanup.obsolete_tag("3.15-dev", {"3.15-dev-2026.11"}, True, "3.15", "2026.11"))
+        for tag in ("3.9-dev", "3.9-dev-2026.11.16.8", "3.9-dev-2026.11", "3.9-dev-2026.11.0"):
+            self.assertTrue(cleanup.obsolete_tag(tag, {"3.15-dev-2026.11.0"}, True, "3.15", "2026.11.0"))
+            self.assertFalse(cleanup.obsolete_tag(tag, {"3.15-dev"}, True, "3.15", "2026.11.0"))
+        self.assertFalse(cleanup.obsolete_tag("3.15-dev", {"3.15-dev-2026.11.0"}, True, "3.15", "2026.11.0"))
+
+    def test_preserves_existing_release_tags(self):
+        for tag in ("3.23-2026.10.3", "3.23-2026.11.0", "3.23-2026.11.1"):
+            self.assertFalse(cleanup.obsolete_tag(tag, {"3.23-2026.11.1"}, False, "3.15", "2026.11.1"))
 
     def test_replacement_only_covers_platforms_present_in_the_image_index(self):
         index = {"manifests": [
