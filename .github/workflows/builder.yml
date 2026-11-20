@@ -81,7 +81,7 @@ jobs:
           version="${GITHUB_SHA::7}"
           suffix=""
           if [[ -n "${release_tag}" ]]; then
-            if [[ ! "${release_tag}" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+$ ||
+            if [[ ! "${release_tag}" =~ ^[0-9]{4}\.(0?[1-9]|1[0-2])\.[0-9]+$ ||
                   "${GITHUB_REF}" != "refs/tags/${release_tag}" || "${push}" != true ]]; then
               echo "::error::Release builds must publish from the matching stable release tag"
               exit 1
