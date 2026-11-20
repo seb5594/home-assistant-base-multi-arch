@@ -46,7 +46,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          filter='.[] | select((.draft or .prerelease) | not) | .tag_name | select(test("^[0-9]{4}\\.[0-9]{2}\\.[0-9]+$"))'
+          filter='.[] | select((.draft or .prerelease) | not) | .tag_name | select(test("^[0-9]{4}\\.(0?[1-9]|1[0-2])\\.[0-9]+$"))'
           upstream="$(gh api --paginate repos/home-assistant/docker-base/releases --jq "${filter}" | sort -Vu)"
           published="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" --jq "${filter}" | sort -Vu)"
           if [[ -z "${upstream}" ]]; then
